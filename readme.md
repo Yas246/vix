@@ -1,6 +1,7 @@
 # Vix
 
 ![Vix Logo](./vix.svg)
+![Vix Logo](./vix2.svg)
 
 **Vix** est une application Python qui génère des requêtes SQL intelligentes à partir de commandes en langage naturel. Elle utilise **LangChain** et **Google Generative AI (Gemini)**, et prend en charge plusieurs systèmes de gestion de base de données (SGBD).
 
