@@ -1,0 +1,9 @@
+langchain
+langchain-community
+langchain-google-genai
+python-dotenv
+sqlalchemy
+psycopg2-binary
+pymysql
+pyodbc
+cx_Oracle
