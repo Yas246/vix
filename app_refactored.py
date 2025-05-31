@@ -98,13 +98,47 @@ def get_database_connection(status_cb: Callable[[str], None]) -> tuple[SQLDataba
         raise ConnectionError(f"Failed to create SQLDatabase from URI: {e}")
 
 
+def get_database_specific_prompt(db_type: str) -> str:
+    """Retourne un prompt adapté au type de base de données"""
+    
+    base_prompt = """Tu es un expert en bases de données. Génère une requête SQL pour répondre à la question de l'utilisateur.
+    
+Règles importantes:
+- Utilise uniquement les tables et colonnes qui existent dans le schéma fourni
+- La requête doit être syntaxiquement correcte pour {db_type}
+- Limite les résultats à 100 lignes maximum avec LIMIT
+- Pour les recherches textuelles, utilise la syntaxe appropriée à {db_type}
+- N'utilise que SELECT, pas de modification de données
+"""
+    
+    # Ajouts spécifiques par type de BDD
+    db_specifics = {
+        "sqlite": "- Utilise LIKE pour les recherches textuelles (sensible à la casse)\n- Date/time avec strftime() si nécessaire",
+        "postgresql": "- Utilise ILIKE pour les recherches insensibles à la casse\n- Fonctions PostgreSQL natives disponibles",
+        "mysql": "- Utilise LIKE (insensible à la casse par défaut)\n- Fonctions MySQL disponibles",
+        "mssql": "- Utilise LIKE avec COLLATE pour contrôler la casse\n- Fonctions SQL Server disponibles",
+        "oracle": "- Utilise UPPER() avec LIKE pour recherches insensibles à la casse\n- Fonctions Oracle disponibles"
+    }
+    
+    specific_rules = db_specifics.get(db_type, "- Utilise la syntaxe SQL standard")
+    
+    return base_prompt.format(db_type=db_type.upper()) + "\n" + specific_rules
+
 def get_answer_prompt_template(db_type: str) -> PromptTemplate:
-    template_str = """Answer the user's question based on the SQL query and its result.
-Database type: {db_type_upper}
+    template_str = """Tu es un assistant expert en bases de données {db_type_upper}.
+Réponds à la question de l'utilisateur en français de manière claire et structurée.
+
+Si aucun résultat n'est trouvé, explique pourquoi de façon constructive.
+Si les résultats sont nombreux, présente-les de manière organisée.
+Si la requête a des limites, mentionne-le à l'utilisateur.
+Si les résultats nécessitent un tableau, inclus-le dans ta réponse.
+Ne montre JAMAIS les données brutes (tuples, listes).
+
 Question: {{question}}
-SQL Query: {{query}}
-Query Result: {{result}}
-Answer (in French, be concise and clear): """
+Requête SQL ({db_type_upper}): {{query}}
+Résultat: {{result}}
+
+Réponse détaillée: """
     return PromptTemplate.from_template(template_str.format(db_type_upper=db_type.upper()))
 
 def validate_sql_query(query: str, db_type: str) -> bool:
@@ -119,6 +153,60 @@ def validate_sql_query(query: str, db_type: str) -> bool:
     if not query_upper.startswith("SELECT") and not query_upper.startswith("WITH"):
          raise ValueError("Query must be a SELECT statement.")
     return True
+
+def format_query_result(result: str, query: str) -> str:
+    """Formate le résultat de la requête en un tableau Markdown."""
+    try:
+        # Si le résultat est déjà un tableau Markdown
+        if isinstance(result, str) and '|' in result:
+            return result
+
+        # Convertir le résultat en liste de dictionnaires si nécessaire
+        if isinstance(result, str):
+            try:
+                result = json.loads(result)
+            except:
+                # Si c'est une chaîne mais pas du JSON valide
+                return result
+
+        # Si le résultat est vide
+        if not result or (isinstance(result, list) and len(result) == 0):
+            return "Aucun résultat trouvé."
+
+        # Si le résultat est une liste de tuples, le convertir en liste de dictionnaires
+        if isinstance(result, list) and isinstance(result[0], (tuple, list)):
+            # Créer des noms de colonnes génériques
+            columns = [f"Colonne_{i+1}" for i in range(len(result[0]))]
+            result = [dict(zip(columns, row)) for row in result]
+        elif not isinstance(result, list) or not isinstance(result[0], dict):
+            return str(result)
+
+        # Obtenir les colonnes
+        columns = list(result[0].keys())
+
+        # Créer l'en-tête du tableau
+        header = "| " + " | ".join(str(col) for col in columns) + " |"
+        separator = "| " + " | ".join("-" * max(len(str(col)), 3) for col in columns) + " |"
+
+        # Créer les lignes de données
+        rows = []
+        for row in result:
+            row_values = []
+            for col in columns:
+                val = row.get(col, '')
+                if val is None:
+                    val = 'NULL'
+                elif isinstance(val, (int, float)):
+                    val = f"{val:,}".replace(',', ' ')
+                # Nettoyer l'encodage des caractères spéciaux
+                val = str(val).replace('Ã©', 'é').replace('Ã¨', 'è').replace('Ã´', 'ô').replace('Ã', 'É')
+                row_values.append(str(val))
+            rows.append("| " + " | ".join(row_values) + " |")
+
+        # Assembler le tableau
+        return "\n".join([header, separator] + rows)
+    except Exception as e:
+        return f"Erreur de formatage: {str(e)}"
 
 def initialize_and_process_question(question_text: str, status_cb_param: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
     logs: List[str] = []
@@ -139,7 +227,6 @@ def initialize_and_process_question(question_text: str, status_cb_param: Optiona
         else:
             log("Google API Key check: SKIPPED (LLM Bypass Mode).")
 
-
         db, detected_db_type = get_database_connection(log)
         log(f"Database connection established for type: {detected_db_type.upper()}.")
 
@@ -151,7 +238,6 @@ def initialize_and_process_question(question_text: str, status_cb_param: Optiona
 
         generated_sql = ""
         if llm_bypass_active:
-            # Fix for f-string SyntaxError: move replace out
             safe_question_snippet = question_text[:50].replace("'", "''")
             generated_sql = f"SELECT 'LLM Bypass: Query for: {safe_question_snippet}' AS status, 1 AS value;"
             log(f"LLM Bypass: Using dummy SQL: {generated_sql}")
@@ -180,10 +266,13 @@ def initialize_and_process_question(question_text: str, status_cb_param: Optiona
         query_result = execute_query_tool.invoke({"query": cleaned_sql})
         log(f"Query executed. Result length: {len(str(query_result)) if query_result is not None else 'N/A'}.")
 
+        # Formater le résultat en tableau Markdown
+        formatted_result = format_query_result(query_result, cleaned_sql)
+        log("Query result formatted as Markdown table.")
+
         final_natural_answer = ""
         if llm_bypass_active:
-            safe_question_snippet_ans = question_text[:50].replace("'", "''") # also escape for this string
-            final_natural_answer = f"LLM Bypass: Dummy answer for '{safe_question_snippet_ans}'. DB Result (first 100 chars): {str(query_result)[:100]}"
+            final_natural_answer = f"LLM Bypass: Dummy answer for '{safe_question_snippet}'.\n\n{formatted_result}"
             log(f"LLM Bypass: Using dummy natural language answer.")
         else:
             if 'llm' not in locals():
@@ -192,23 +281,29 @@ def initialize_and_process_question(question_text: str, status_cb_param: Optiona
             log("Answer prompt template created.")
             final_answer_chain = answer_prompt | llm | StrOutputParser()
             final_natural_answer = final_answer_chain.invoke({
-                "question": question_text, "query": cleaned_sql, "result": query_result
+                "question": question_text,
+                "query": cleaned_sql,
+                "result": formatted_result  # Utiliser le résultat formaté
             })
             log("Final natural language answer generated.")
 
         return {
-            "sql_query": cleaned_sql, "result": query_result, "answer": final_natural_answer,
-            "logs": logs, "error": None
+            "sql_query": cleaned_sql,
+            "result": formatted_result,
+            "answer": final_natural_answer,
+            "logs": logs,
+            "error": None
         }
 
     except Exception as e:
-        log(f"Error during Vix processing: {type(e).__name__} - {str(e)}")
-        import traceback
-        error_trace = traceback.format_exc(limit=2)
-        log(f"Traceback (simplified): {error_trace}")
+        error_msg = f"Error: {str(e)}"
+        log(error_msg)
         return {
-            "sql_query": None, "result": None, "answer": None,
-            "logs": logs, "error": f"{type(e).__name__}: {str(e)}\n{error_trace}"
+            "sql_query": None,
+            "result": None,
+            "answer": error_msg,
+            "logs": logs,
+            "error": str(e)
         }
 
 if __name__ == '__main__':
@@ -249,3 +344,4 @@ if __name__ == '__main__':
     del os.environ["VIX_TEST_MODE_NO_LLM"]
     if os.environ.get("DB_PATH") == "vix_selftest_bypass.db" and os.path.exists("vix_selftest_bypass.db"):
         print(f"Dummy DB vix_selftest_bypass.db was used.")
+#finished

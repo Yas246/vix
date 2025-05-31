@@ -8,3 +8,4 @@ pymysql
 pyodbc
 cx_Oracle
 ttkthemes
+pyinstaller

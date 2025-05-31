@@ -493,3 +493,4 @@ while True:
         print(f"\n❌ Erreur lors du traitement: {e}")
         if "syntax" in str(e).lower():
             print(f"💡 Cette erreur peut être liée aux spécificités du dialecte SQL {detected_db_type.upper()}")
+#finished
