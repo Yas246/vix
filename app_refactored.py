@@ -156,7 +156,7 @@ def initialize_and_process_question(question_text: str, status_cb_param: Optiona
             generated_sql = f"SELECT 'LLM Bypass: Query for: {safe_question_snippet}' AS status, 1 AS value;"
             log(f"LLM Bypass: Using dummy SQL: {generated_sql}")
         else:
-            llm_model_name = "gemini-pro"
+            llm_model_name = "gemini-2.0-flash"
             llm = ChatGoogleGenerativeAI(model=llm_model_name, temperature=0.0, convert_system_message_to_human=True)
             log(f"LLM initialized with model: {llm_model_name}.")
             write_query_chain = create_sql_query_chain(llm, db)
@@ -187,7 +187,7 @@ def initialize_and_process_question(question_text: str, status_cb_param: Optiona
             log(f"LLM Bypass: Using dummy natural language answer.")
         else:
             if 'llm' not in locals():
-                 llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.0, convert_system_message_to_human=True)
+                 llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0.0, convert_system_message_to_human=True)
             answer_prompt = get_answer_prompt_template(detected_db_type)
             log("Answer prompt template created.")
             final_answer_chain = answer_prompt | llm | StrOutputParser()
