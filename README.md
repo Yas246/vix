@@ -1,4 +1,4 @@
-# SQL AI Assistant TypeScript Package
+# Vix SQL AI Assistant TypeScript Package
 
 ## Description
 
@@ -15,7 +15,7 @@ This TypeScript package empowers your applications to interact with SQL database
 ## Installation
 
 ```bash
-npm install @google/sql-ai-assistant # Replace with your actual package name when published
+npm install vix-sql-ai
 ```
 
 ## Prerequisites
