@@ -36,7 +36,7 @@
 ## 🚀 Installation
 
 ```bash
-git clone https://github.com/tonutilisateur/vix.git
+git clone https://github.com/Yas246/vix
 cd vix
 python -m venv venv
 source venv/bin/activate  # sous Windows : venv\Scripts\activate
